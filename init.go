@@ -2,23 +2,22 @@ package metrics
 
 import (
 	"context"
-	"log"
-	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// key is an unexported type for keys defined in this package.
 type key int
 
-const (
-	elapsedKey key = 0
-)
+// elapsedKey is the key for elapsedRecord which holds start end elapsed time
+// in Contexts.
+const elapsedKey key = 0
 
+// MustRegister regusters the provides prometheus.Collectors and the pre defined
+// prometheus.Collectors with the prometheus.DefaultRegisterer and panics of any
+// error occurs.
 func MustRegister(collectors ...prometheus.Collector) {
-	appName := os.Args[0]
-	log.Printf("Registering metrics for %s\n", appName)
-
 	prometheus.MustRegister(PrometheusHTTPRequestCount)
 	prometheus.MustRegister(PrometheusHTTPRequestLatency)
 	prometheus.MustRegister(PrometheusHTTPResponseCount)
@@ -30,15 +29,16 @@ func MustRegister(collectors ...prometheus.Collector) {
 	}
 }
 
-type StoppedFunc func(elapsed time.Duration)
-
 type elapsedRecord struct {
 	start   time.Time
 	elapsed time.Duration
 	cancel  context.CancelFunc
 }
 
-func NewContext(parent context.Context, stopped StoppedFunc) context.Context {
+// NewContext returns a new Context that carries the start time and calls the
+// provided stopped function then the created Context is cancelled. The stopped
+// function can be nil in which case nothing is called.
+func NewContext(parent context.Context, stopped func(elapsed time.Duration)) context.Context {
 	ctx, cancel := context.WithCancel(parent)
 	recordPtr := &elapsedRecord{
 		start:  time.Now(),
@@ -56,14 +56,17 @@ func NewContext(parent context.Context, stopped StoppedFunc) context.Context {
 	return ctx
 }
 
+// StartFromContext returns the start time from the provided Context.
 func StartFromContext(ctx context.Context) time.Time {
 	return ctx.Value(elapsedKey).(*elapsedRecord).start
 }
 
+// ElapsedFromContext returns the elapsed time from the provided Context.
 func ElapsedFromContext(ctx context.Context) time.Duration {
 	return ctx.Value(elapsedKey).(*elapsedRecord).elapsed
 }
 
+// CancelContext cancels the provided Context if it carries start time.
 func CancelContext(ctx context.Context) {
 	recordPtr := ctx.Value(elapsedKey).(*elapsedRecord)
 	if recordPtr != nil {
