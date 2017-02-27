@@ -14,7 +14,7 @@ type key int
 // in Contexts.
 const elapsedKey key = 0
 
-// MustRegister regusters the provides prometheus.Collectors and the pre defined
+// MustRegister registers the provided prometheus.Collectors and the pre-defined
 // prometheus.Collectors with the prometheus.DefaultRegisterer and panics of any
 // error occurs.
 func MustRegister(collectors ...prometheus.Collector) {
@@ -32,6 +32,7 @@ func MustRegister(collectors ...prometheus.Collector) {
 type elapsedRecord struct {
 	start   time.Time
 	elapsed time.Duration
+	done    chan bool
 	cancel  context.CancelFunc
 }
 
@@ -42,12 +43,14 @@ func NewContext(parent context.Context, stopped func(elapsed time.Duration)) con
 	ctx, cancel := context.WithCancel(parent)
 	recordPtr := &elapsedRecord{
 		start:  time.Now(),
+		done:   make(chan bool),
 		cancel: cancel,
 	}
 	ctx = context.WithValue(ctx, elapsedKey, recordPtr)
 	go func() {
 		<-ctx.Done()
-		recordPtr.elapsed = time.Now().Sub(recordPtr.start)
+		recordPtr.elapsed = time.Since(recordPtr.start)
+		close(recordPtr.done)
 		if stopped != nil {
 			stopped(recordPtr.elapsed)
 		}
@@ -61,9 +64,16 @@ func StartFromContext(ctx context.Context) time.Time {
 	return ctx.Value(elapsedKey).(*elapsedRecord).start
 }
 
-// ElapsedFromContext returns the elapsed time from the provided Context.
+// ElapsedFromContext returns the elapsed time from the provided Context. If the
+// provided context is not yet cancelled the duration from now since start is
+// returned.
 func ElapsedFromContext(ctx context.Context) time.Duration {
-	return ctx.Value(elapsedKey).(*elapsedRecord).elapsed
+	elapsed := ctx.Value(elapsedKey).(*elapsedRecord).elapsed
+	if elapsed > 0 {
+		return elapsed
+	}
+
+	return time.Since(StartFromContext(ctx))
 }
 
 // CancelContext cancels the provided Context if it carries start time.
@@ -71,5 +81,6 @@ func CancelContext(ctx context.Context) {
 	recordPtr := ctx.Value(elapsedKey).(*elapsedRecord)
 	if recordPtr != nil {
 		recordPtr.cancel()
+		<-recordPtr.done // Wait until done is complete.
 	}
 }
