@@ -1,4 +1,4 @@
-package metrics
+package timing
 
 import (
 	"testing"
